@@ -16,7 +16,7 @@ public class Test {
     }
 
     public Test(String message) {
-        Log.e(MainApplication.TAG,"invoke ConstrctorTest");
+        Log.e(MainApplication.TAG,"invoke ConstrctorTest " + message);
         mMessage = message;
     }
 

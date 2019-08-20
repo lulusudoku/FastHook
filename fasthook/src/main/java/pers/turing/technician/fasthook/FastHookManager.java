@@ -85,7 +85,6 @@ public class FastHookManager {
             throwException(new FastHookException("invalid param"));
             return;
         }
-
         Class[] paramType = getParamType(methodSig,classLoader);
 
         try {
@@ -95,7 +94,6 @@ public class FastHookManager {
             }else {
                 targetClass = Class.forName(className);
             }
-
             if(targetClass == null) {
                 throwException(new FastHookException("targetClass is null!"));
                 return;
@@ -107,7 +105,6 @@ public class FastHookManager {
             }else {
                 targetMethod = targetClass.getDeclaredMethod(methodName,paramType);
             }
-
             if(targetMethod == null) {
                 throwException(new FastHookException("targetMethod is null!"));
                 return;
@@ -124,15 +121,12 @@ public class FastHookManager {
                 throwException(new FastHookException("hookMethod is null!"));
                 return;
             }
-
             Member forwardMethod = generateForwardMethod(targetMethod,FastHookManager.class.getClassLoader(),paramType);
             if(forwardMethod == null) {
                 throwException(new FastHookException("forwardMethod is null!"));
                 return;
             }
-
             doHook(targetMethod,hookMethod,forwardMethod,paramType,callback,mode,0);
-
             if(!jitInline  && Build.VERSION.SDK_INT >= ANDROID_N) {
                 disableJITInline();
             }
@@ -163,6 +157,8 @@ public class FastHookManager {
                 long entryPoint = getMethodEntryPoint(targetMethod);
                 Logd("EntryPoint:0x"+Long.toHexString(entryPoint));
 
+                /** If method already been hooked, do parRewriteHook, current this feature has problem.*/
+                // TODO: Fix this feature
                 ArrayList<HookRecord> quickTrampolineList = mQuickTrampolineMap.get(Long.valueOf(entryPoint));
                 if(quickTrampolineList != null) {
                     int i = 0;
@@ -494,7 +490,9 @@ public class FastHookManager {
 
     private static Member getHookHandle(Member targetMethod) {
         if(targetMethod instanceof Constructor) {
-            return getMethod("hookHandleVoid");
+            // Constructor return class's object, so we need handler that return an object
+            // return getMethod("hookHandleVoid");
+            return getMethod("hookHandleObject");
         }else if(targetMethod instanceof Method) {
             Class returnType = ((Method)targetMethod).getReturnType();
             if(returnType == boolean.class) {
@@ -644,15 +642,17 @@ public class FastHookManager {
         return arrayClassBuilder.toString();
     }
 
+    // TODO: Parse Float param
     private static FastHookParam parseParam(long sp, Class[] paramType, boolean isStatic) {
         FastHookParam param = new FastHookParam();
 
-        int offset = 0;
+        int offset = 0x20; // We store args from [sp+0x20]
+        int step = 0x8;
         List<Object> args = new ArrayList<Object>();
 
         if(!isStatic) {
             param.receiver = getObjectParam(sp,offset);
-            offset += 4;
+            offset += step;
         }
 
         if(paramType == null)
@@ -662,42 +662,34 @@ public class FastHookManager {
             if(type.equals(boolean.class)) {
                 boolean b = getBooleanParam(sp,offset);
                 args.add(new Boolean(b));
-                offset += 4;
             }else if(type.equals(byte.class)) {
                 byte b2 = getByteParam(sp,offset);
                 args.add(new Byte(b2));
-                offset += 4;
             }else if(type.equals(char.class)) {
                 char c = getCharParam(sp,offset);
                 args.add(new Character(c));
-                offset += 4;
             }else if(type.equals(short.class)) {
                 short s = getShortParam(sp,offset);
                 args.add(new Short(s));
-                offset += 4;
             }else if(type.equals(int.class)) {
                 int i = getIntParam(sp,offset);
                 args.add(new Integer(i));
-                offset += 4;
             }else if(type.equals(long.class)) {
                 long l = getLongParam(sp,offset);
                 args.add(new Long(l));
-                offset += 8;
             }else if(type.equals(float.class)) {
                 float f = getFloatParam(sp,offset);
                 args.add(new Float(f));
-                offset += 4;
             }else if(type.equals(double.class)) {
                 double d = getDoubleParam(sp,offset);
                 args.add(new Double(d));
-                offset += 8;
             }else if(type.equals(void.class)) {
 
             }else {
                 Object obj = getObjectParam(sp,offset);
                 args.add(obj);
-                offset += 4;
             }
+            offset += step;
         }
 
         if(!args.isEmpty()) {

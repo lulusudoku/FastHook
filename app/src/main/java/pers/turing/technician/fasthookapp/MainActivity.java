@@ -125,7 +125,6 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void afterHookedMethod(FastHookParam param) {
-
             }
         },mode,false);
 
@@ -218,14 +217,13 @@ public class MainActivity extends AppCompatActivity {
             public void beforeHookedMethod(FastHookParam param) {
                 CharSequence charSequence = (CharSequence) param.args[0];
                 if(charSequence.toString().contains("Test SystemMethod") && !charSequence.toString().contains("hook param")) {
-                    Log.e(MainApplication.TAG,"beforeHookedMethod SystemTest");
+                    Log.e(MainApplication.TAG,"beforeHookedMethod SystemTest " + charSequence.toString());
                     param.args[0] = "hook param-"+charSequence;
                 }
             }
 
             @Override
             public void afterHookedMethod(FastHookParam param) {
-
             }
         },mode,false);
     }
@@ -245,7 +243,6 @@ public class MainActivity extends AppCompatActivity {
 
         Test test = new Test(mConstructorText.getText().toString());
         mConstructorText.setText(mode + test.mMessage);
-
         if(test.mMessage.contains("hook param")) {
             mConstructorText.setTextColor(Color.GREEN);
         }else {

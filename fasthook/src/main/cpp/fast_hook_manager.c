@@ -301,7 +301,7 @@ jint Init(JNIEnv *env, jclass clazz, jint version) {
         case kAndroidLMR1:
 	        kArtMethodAccessFlagsOffset = 4 * 2 + 4 * 3;
             kArtMethodInterpreterEntryOffset = RoundUp(4 * 2 + 4 * 7,pointer_size_);
-            kArtMethodQuickCodeOffset = RoundUp(4 * 2 + 4 * 7,pointer_size_) + pointer_size_ * 2;
+            kArtMethodQuickCodeOffset = RoundUp(4 * 2 + 4 * 7,pointer_size_) + pointer_size_ * 2; //entry_point_from_quick_compiled_code_
             kClassSuperOffset = 4 * 2 + 4 * 9;
             break;
         case kAndroidL:
@@ -312,7 +312,7 @@ jint Init(JNIEnv *env, jclass clazz, jint version) {
             break;
     }
 
-    InitTrampoline(version);
+    // InitTrampoline(version);
 
     sigaction_info_ = (struct SigactionInfo *)malloc(sizeof(struct SigactionInfo));
     sigaction_info_->addr = NULL;
@@ -720,9 +720,9 @@ int CheckJitState(JNIEnv *env, jclass clazz, jobject target_method) {
 }
 
 jint DoFullRewriteHook(JNIEnv *env, jclass clazz, jobject target_method, jobject hook_method, jobject forward_method, jobject head_record, jobject target_record, jobject tail_record) {
-    void *art_target_method = (void *)(*env)->FromReflectedMethod(env, target_method);
-    void *art_hook_method = (void *)(*env)->FromReflectedMethod(env, hook_method);
-    void *art_forward_method = NULL;
+    void *art_target_method = (void *)(*env)->FromReflectedMethod(env, target_method); // get ArtMethod Pointer
+    void *art_hook_method = (void *)(*env)->FromReflectedMethod(env, hook_method); // hookHandle*
+    void *art_forward_method = NULL; // Dynamic proxy method
     if(forward_method != NULL) {
         art_forward_method = (void *)(*env)->FromReflectedMethod(env, forward_method);
     }
@@ -790,17 +790,17 @@ jint DoFullRewriteHook(JNIEnv *env, jclass clazz, jobject target_method, jobject
 	void *forward_entry = quick_target_trampoline;
 
 	int jump_trampoline_len = 4 * 4;
-	int quick_hook_trampoline_len = 19 * 4;
+	int quick_hook_trampoline_len = 31 * 4;
 	int quick_target_trampoline_len = 11 * 4;
 	int quick_original_trampoline_len = 11 * 4;
 	int original_prologue_len = 16;
 
 	int jump_trampoline_entry_index = 8;
 
-	int quick_hook_trampoline_target_index = 44;
-	int quick_hook_trampoline_hook_index = 52;
-	int quick_hook_trampoline_hook_entry_index = 60;
-	int quick_hook_trampoline_next_entry_index = 68;
+	int quick_hook_trampoline_target_index = 92;
+	int quick_hook_trampoline_hook_index = 100;
+	int quick_hook_trampoline_hook_entry_index = 108;
+	int quick_hook_trampoline_next_entry_index = 116;
 
 	int quick_target_trampoline_original_index = 4;
 	int quick_target_trampoline_target_index = 28;
@@ -812,6 +812,7 @@ jint DoFullRewriteHook(JNIEnv *env, jclass clazz, jobject target_method, jobject
 	void *original_next_entry = (void *)((long)target_entry + original_prologue_len);
 
 	unsigned char *original_code = (unsigned char *) quick_original_trampoline;
+	// Set original_trampoline first insn to `NOP`
 	original_code[0] = 0x1f;
 	original_code[1] = 0x20;
 	original_code[2] = 0x03;
@@ -819,18 +820,20 @@ jint DoFullRewriteHook(JNIEnv *env, jclass clazz, jobject target_method, jobject
 
 #endif
 
+	//First, Backup target method's first 4 insns, because we would replace them with jmp insn.
     unsigned char original_prologue[original_prologue_len];
     memcpy(original_prologue,(unsigned char *)target_code,original_prologue_len);
     for(int i = 0;i < 3;i++) {
         LOGI("OriginalPrologue[%d] %x %x %x %x",i,((unsigned char*)original_prologue)[i*4+0],((unsigned char*)original_prologue)[i*4+1],((unsigned char*)original_prologue)[i*4+2],((unsigned char*)original_prologue)[i*4+3]);
     }
 
+    // Patch jump_trampoline `hook_entry_point`, jump to hook_trampoline_entry
     memcpy(jump_trampoline + jump_trampoline_entry_index, &quick_hook_trampoline_entry, pointer_size_);
     for(int i = 0;i < jump_trampoline_len/4;i++) {
         LOGI("JumpTrampoline[%d] %x %x %x %x",i,((unsigned char*)jump_trampoline)[i*4+0],((unsigned char*)jump_trampoline)[i*4+1],((unsigned char*)jump_trampoline)[i*4+2],((unsigned char*)jump_trampoline)[i*4+3]);
     }
 
-
+    // Patch hook_trampoline_entry
     memcpy(quick_hook_trampoline + quick_hook_trampoline_target_index, &art_target_method, pointer_size_);
     memcpy(quick_hook_trampoline + quick_hook_trampoline_hook_index, &art_hook_method, pointer_size_);
     memcpy(quick_hook_trampoline + quick_hook_trampoline_hook_entry_index, &hook_entry, pointer_size_);
@@ -839,6 +842,7 @@ jint DoFullRewriteHook(JNIEnv *env, jclass clazz, jobject target_method, jobject
         LOGI("QuickHookTrampoline[%d] %x %x %x %x",i,((unsigned char*)quick_hook_trampoline)[i*4+0],((unsigned char*)quick_hook_trampoline)[i*4+1],((unsigned char*)quick_hook_trampoline)[i*4+2],((unsigned char*)quick_hook_trampoline)[i*4+3]);
     }
 
+    // Patch forward method prologue and next insn addr
     if(art_forward_method) {
         memcpy(quick_target_trampoline + quick_target_trampoline_original_index, original_prologue, original_prologue_len);
         memcpy(quick_target_trampoline + quick_target_trampoline_target_index, &art_target_method, pointer_size_);
@@ -848,12 +852,14 @@ jint DoFullRewriteHook(JNIEnv *env, jclass clazz, jobject target_method, jobject
         }
     }
 
+    // Just patch original_prologue and original_next_entry, because first insn already set to `NOP`
     memcpy(quick_original_trampoline + quick_original_trampoline_target_index, original_prologue, original_prologue_len);
     memcpy(quick_original_trampoline + quick_original_trampoline_original_next_entry, &original_next_entry, pointer_size_);
     for(int i = 0;i < quick_original_trampoline_len/4;i++) {
         LOGI("QuickOriginalTrampoline[%d] %x %x %x %x",i,((unsigned char*)quick_original_trampoline)[i*4+0],((unsigned char*)quick_original_trampoline)[i*4+1],((unsigned char*)quick_original_trampoline)[i*4+2],((unsigned char*)quick_original_trampoline)[i*4+3]);
     }
 
+    // art_forward_method jump to original method
     if(art_forward_method) {
         memcpy((unsigned char *) art_forward_method + kArtMethodQuickCodeOffset,&forward_entry,pointer_size_);
         LOGI("Forward NewEntry:%p",ReadPointer((unsigned char *) art_forward_method + kArtMethodQuickCodeOffset));
@@ -881,12 +887,15 @@ jint DoFullRewriteHook(JNIEnv *env, jclass clazz, jobject target_method, jobject
         sigaction(SIGSEGV, current_handler_, NULL);
     }
 
+    // Patch target method entrypoint insn
     long page_size = sysconf(_SC_PAGESIZE);
     unsigned alignment = (unsigned)((unsigned long long)target_code % page_size);
     int ret = mprotect((void *) (target_code - alignment), (size_t) (alignment + jump_trampoline_len),
                        PROT_READ | PROT_WRITE | PROT_EXEC);
     LOGI("Mprotect:%d Pagesize:%d Alignment:%d",ret,page_size,alignment);
 
+    // In case the method are called during we're hooking, so before we do hook, forcing ArtMethod to
+    // interpreter way. When finished, back to original way.
     memcpy((unsigned char *) art_target_method + kArtMethodQuickCodeOffset,&art_quick_to_interpreter_bridge_,pointer_size_);
     memcpy(target_code, jump_trampoline, jump_trampoline_len);
     for(int i = 0;i < jump_trampoline_len/4;i++) {
@@ -957,13 +966,13 @@ jint DoPartRewriteHook(JNIEnv *env, jclass clazz, jobject target_method, jobject
 	void *prev_next_entry = quick_hook_trampoline;
 	void *forward_entry = quick_target_trampoline;
 
-	int quick_hook_trampoline_len = 16 * 4;
+	int quick_hook_trampoline_len = 31 * 4;
 	int quick_target_trampoline_len = 11 * 4;
 
-	int quick_hook_trampoline_target_index = 32;
-	int quick_hook_trampoline_hook_index = 40;
-	int quick_hook_trampoline_hook_entry_index = 48;
-	int quick_hook_trampoline_next_entry_index = 56;
+	int quick_hook_trampoline_target_index = 92;
+	int quick_hook_trampoline_hook_index = 100;
+	int quick_hook_trampoline_hook_entry_index = 108;
+	int quick_hook_trampoline_next_entry_index = 116;
 
 	int original_prologue_len = 16;
 	int quick_original_trampoline_original_index = 4;
@@ -1029,6 +1038,7 @@ jint DoReplaceHook(JNIEnv *env, jclass clazz, jobject target_method, jobject hoo
     void *art_target_method = (void *)(*env)->FromReflectedMethod(env, target_method);
     void *art_hook_method = (void *)(*env)->FromReflectedMethod(env, hook_method);
     void *art_forward_method = NULL;
+    void *hook_entry = (void *)ReadPointer((unsigned char *) art_hook_method + kArtMethodQuickCodeOffset);
     if(forward_method != NULL) {
         art_forward_method = (void *)(*env)->FromReflectedMethod(env, forward_method);
     }
@@ -1044,33 +1054,33 @@ jint DoReplaceHook(JNIEnv *env, jclass clazz, jobject target_method, jobject hoo
     void *target_trampoline = CreatTrampoline(kTargetTrampoline);
 
 #if defined(__arm__)
-
     int hook_trampoline_len = 7 * 4;
     int target_trampoline_len = 4 * 4;
 
     int hook_trampoline_target_index = 24;
     int target_trampoline_target_index = 8;
+    int hook_trampoline_target_entry_index = 80; // For arm32, this value is not correct
     int target_trampoline_target_entry_index = 12;
 
     void *new_target_entry = CodePointToEntryPoint(hook_trampoline);
     void *new_forward_entry =  CodePointToEntryPoint(target_trampoline);
 
-#elif defined(__aarch64__)
-
-    int hook_trampoline_len = 8 * 4;
+#elif defined(__aarch64__)    
+    int hook_trampoline_len = 22 * 4;
 	int target_trampoline_len = 7 * 4;
 
-	int hook_trampoline_target_index = 24;
+	int hook_trampoline_target_index = 72;
+    int hook_trampoline_target_entry_index = 80;
 	int target_trampoline_target_index = 12;
 	int target_trampoline_target_entry_index = 20;
 
 	void *new_target_entry = hook_trampoline;
-	void *new_forward_entry =  target_trampoline;
+	void *new_forward_entry = target_trampoline;
 
 #endif
-
-    memcpy((unsigned char *) hook_trampoline + hook_trampoline_target_index, &art_hook_method, pointer_size_);
-
+    // Patch hook trampoline, art_hook_method
+    memcpy(hook_trampoline + hook_trampoline_target_index, &art_hook_method, pointer_size_);
+    memcpy(hook_trampoline + hook_trampoline_target_entry_index, &hook_entry, pointer_size_);
     LOGI("HookTrampoline:%p HookMethod:%p TargetMethod:%p ForwardMethod:%p",hook_trampoline,art_hook_method,art_target_method,art_forward_method);
     for(int i = 0; i < hook_trampoline_len/4; i++) {
         LOGI("HookTrampoline[%d] %x %x %x %x",i,((unsigned char*)hook_trampoline)[i*4+0],((unsigned char*)hook_trampoline)[i*4+1],((unsigned char*)hook_trampoline)[i*4+2],((unsigned char*)hook_trampoline)[i*4+3]);
@@ -1097,8 +1107,7 @@ jint DoReplaceHook(JNIEnv *env, jclass clazz, jobject target_method, jobject hoo
             LOGI("TargetTrampoline[%d] %x %x %x %x",i,((unsigned char*)target_trampoline)[i*4+0],((unsigned char*)target_trampoline)[i*4+1],((unsigned char*)target_trampoline)[i*4+2],((unsigned char*)target_trampoline)[i*4+3]);
         }
     }
-
-    memcpy((unsigned char *) art_target_method + kArtMethodQuickCodeOffset,&new_target_entry,pointer_size_);
+    memcpy((unsigned char *) art_target_method + kArtMethodQuickCodeOffset,&new_target_entry, pointer_size_);
     LOGI("Target NewEntry:%p",ReadPointer((unsigned char *) art_target_method + kArtMethodQuickCodeOffset));
     if(art_forward_method) {
         memcpy((unsigned char *) art_forward_method + kArtMethodQuickCodeOffset,&new_forward_entry,pointer_size_);
